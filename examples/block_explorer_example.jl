@@ -20,13 +20,13 @@ function example_simple_gaussian()
     log_potential(x) = -0.5 * sum(x.^2)
 
     # Create explorer that updates:
-    # - Variables 1-3 every iteration (frequency = 1)
-    # - Variables 4-10 every 10 iterations (frequency = 10)
-    frequencies = vcat(fill(1, 3), fill(10, 7))
+    # - Variables 1-3 every iteration (period = 1)
+    # - Variables 4-10 every 10 iterations (period = 10)
+    periods = vcat(fill(1, 3), fill(10, 7))
 
     explorer = BlockExplorer(
         SliceSampler(n_passes=2),
-        update_frequency = frequencies
+        update_period = periods
     )
 
     pt = pigeons(
@@ -76,11 +76,11 @@ function example_transit_priorities()
 
     # Update important parameters every iteration,
     # transit priorities every 10 iterations
-    frequencies = vcat(fill(1, n_important), fill(10, n_transits))
+    periods = vcat(fill(1, n_important), fill(10, n_transits))
 
     explorer = BlockExplorer(
         SliceSampler(n_passes=3),
-        update_frequency = frequencies
+        update_period = periods
     )
 
     pt = pigeons(
@@ -98,41 +98,11 @@ function example_transit_priorities()
     return pt
 end
 
-# Example 3: Composing with other explorers
-# ==========================================
-
-function example_composition()
-    println("\n=== Example 3: Composing Explorers ===")
-
-    dim = 6
-    log_potential(x) = -0.5 * sum(x.^2)
-
-    # Create a reduced-frequency slice sampler
-    reduced_slice = BlockExplorer(
-        SliceSampler(n_passes=1),
-        update_frequency = [1, 1, 5, 5, 10, 10]
-    )
-
-    # Compose with another slice sampler pass
-    explorer = Compose(reduced_slice, SliceSampler(n_passes=1))
-
-    pt = pigeons(
-        target = log_potential,
-        explorer = explorer,
-        n_rounds = 6,
-        n_chains = 8
-    )
-
-    println("Composition works! Mean: ", mean(pt.reduced_recorders.online))
-
-    return pt
-end
-
-# Example 4: Different update patterns
+# Example 3: Different update patterns
 # =====================================
 
-function example_varied_frequencies()
-    println("\n=== Example 4: Varied Update Frequencies ===")
+function example_varied_periods()
+    println("\n=== Example 3: Varied Update Periods ===")
 
     dim = 8
     log_potential(x) = -0.5 * sum(x.^2)
@@ -142,11 +112,11 @@ function example_varied_frequencies()
     # Variables 3-4: every 2 iterations (2)
     # Variables 5-6: every 5 iterations (5)
     # Variables 7-8: every 10 iterations (10)
-    frequencies = [1, 1, 2, 2, 5, 5, 10, 10]
+    periods = [1, 1, 2, 2, 5, 5, 10, 10]
 
     explorer = BlockExplorer(
         SliceSampler(n_passes=2),
-        update_frequency = frequencies
+        update_period = periods
     )
 
     pt = pigeons(
@@ -156,16 +126,16 @@ function example_varied_frequencies()
         n_chains = 12
     )
 
-    println("Varied frequencies work! Mean: ", mean(pt.reduced_recorders.online))
+    println("Varied periods work! Mean: ", mean(pt.reduced_recorders.online))
 
     return pt
 end
 
-# Example 5: Cycling through variables
+# Example 4: Cycling through variables
 # =====================================
 
 function example_cycling()
-    println("\n=== Example 5: Cycling Through Variables ===")
+    println("\n=== Example 4: Cycling Through Variables ===")
 
     dim = 6
     log_potential(x) = -0.5 * sum(x.^2)
@@ -175,7 +145,7 @@ function example_cycling()
     # and want to update variables one at a time
     explorer = BlockExplorer(
         SliceSampler(n_passes=1),
-        update_frequency = [3, 3, 3, 1, 1, 1],
+        update_period = [3, 3, 3, 1, 1, 1],
         update_offset = [0, 1, 2, 0, 0, 0]
     )
     # Variables 1-3 cycle (one per iteration)
@@ -197,11 +167,11 @@ function example_cycling()
     return pt
 end
 
-# Example 6: Multiple cycling groups
+# Example 5: Multiple cycling groups
 # ===================================
 
 function example_multiple_cycling_groups()
-    println("\n=== Example 6: Multiple Cycling Groups ===")
+    println("\n=== Example 5: Multiple Cycling Groups ===")
 
     dim = 8
     log_potential(x) = -0.5 * sum(x.^2)
@@ -211,7 +181,7 @@ function example_multiple_cycling_groups()
     # Group 2: Variables 6-8 cycle every 3 iterations (one var per iter)
     explorer = BlockExplorer(
         SliceSampler(n_passes=1),
-        update_frequency = [5, 5, 5, 5, 5,  3, 3, 3],
+        update_period = [5, 5, 5, 5, 5,  3, 3, 3],
         update_offset =    [0, 1, 2, 3, 4,  0, 1, 2]
     )
 
@@ -227,11 +197,11 @@ function example_multiple_cycling_groups()
     return pt
 end
 
-# Example 7: Practical cycling for expensive models
+# Example 6: Practical cycling for expensive models
 # ==================================================
 
 function example_practical_cycling()
-    println("\n=== Example 7: Practical Cycling for Expensive Models ===")
+    println("\n=== Example 6: Practical Cycling for Expensive Models ===")
 
     # Simulate a model where:
     # - Variables 1-3 are critical parameters (always update)
@@ -251,28 +221,28 @@ function example_practical_cycling()
     n_full_groups = div(n_nuisance, group_size)  # 7 groups
     remainder = mod(n_nuisance, group_size)      # 7 remaining
 
-    frequencies = fill(1, n_critical)  # Critical params: always
+    periods = fill(1, n_critical)  # Critical params: always
     offsets = fill(0, n_critical)
 
     # Add cycling groups
     for group in 0:(n_full_groups-1)
-        append!(frequencies, fill(group_size, group_size))
+        append!(periods, fill(group_size, group_size))
         append!(offsets, 0:(group_size-1))
     end
 
     # Add remainder with shorter cycle
     if remainder > 0
-        append!(frequencies, fill(remainder, remainder))
+        append!(periods, fill(remainder, remainder))
         append!(offsets, 0:(remainder-1))
     end
 
     explorer = BlockExplorer(
         SliceSampler(n_passes=2),
-        update_frequency = frequencies,
+        update_period = periods,
         update_offset = offsets
     )
 
-    println("Created explorer with $(length(frequencies)) variables")
+    println("Created explorer with $(length(periods)) variables")
     println("Critical params (always updated): $n_critical")
     println("Nuisance params (cycling): $n_nuisance")
     println("Effective updates per iteration: $n_critical + ~$(div(n_nuisance, group_size))")
@@ -299,8 +269,7 @@ function run_all_examples()
 
     example_simple_gaussian()
     example_transit_priorities()
-    example_composition()
-    example_varied_frequencies()
+    example_varied_periods()
     example_cycling()
     example_multiple_cycling_groups()
     example_practical_cycling()

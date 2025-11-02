@@ -1,19 +1,21 @@
 """
-An explorer wrapper that updates different variables at different frequencies and offsets.
+An explorer wrapper that updates different variables at different periods and offsets.
 
-This explorer wraps a base explorer (typically SliceSampler) and updates different
-variables at different rates. Variables can be updated every N iterations, and offsets
-allow creating cycling groups where variables take turns being updated.
+This explorer wraps a SliceSampler and updates different variables at different rates.
+Variables can be updated every N iterations, and offsets allow creating cycling groups
+where variables take turns being updated. **Only the variables that need updating are
+actually sampled**, making this much more efficient than running a full explorer and
+discarding some updates.
 
 This is useful for models with nuisance parameters that have minimal effect on the
 posterior but are computationally expensive to sample.
 
 # Fields
-- `base_explorer`: The underlying explorer to wrap (e.g., SliceSampler())
-- `update_frequency::Vector{Int}`: Update frequency for each variable.
-  A frequency of 1 means update every iteration, 10 means update every 10 iterations, etc.
+- `slice_sampler::SliceSampler`: The underlying slice sampler configuration
+- `update_period::Vector{Int}`: Update period for each variable.
+  A period of 1 means update every iteration, 10 means update every 10 iterations, etc.
 - `update_offset::Vector{Int}`: Offset within the update cycle for each variable.
-  Variable i is updated when `iteration % frequency[i] == offset[i]`.
+  Variable i is updated when `iteration % period[i] == offset[i]`.
   This enables cycling through groups of variables.
 - `iteration_counts::Dict{Int, Int}`: Internal state tracking iterations per replica
 
@@ -22,13 +24,13 @@ posterior but are computationally expensive to sample.
 # Update variables 1-3 every iteration, variable 4 every 10 iterations
 explorer = BlockExplorer(
     SliceSampler(),
-    update_frequency = [1, 1, 1, 10]
+    update_period = [1, 1, 1, 10]
 )
 
 # Cycle through 3 variables, updating only one per iteration
 explorer = BlockExplorer(
     SliceSampler(),
-    update_frequency = [3, 3, 3],
+    update_period = [3, 3, 3],
     update_offset = [0, 1, 2]
 )
 # Variable 1 updates at iterations 3, 6, 9, ...
@@ -38,17 +40,17 @@ explorer = BlockExplorer(
 # Mixed: always update vars 1-2, update var 3 every 10 iterations, cycle through vars 4-6
 explorer = BlockExplorer(
     SliceSampler(),
-    update_frequency = [1, 1, 10, 3, 3, 3],
+    update_period = [1, 1, 10, 3, 3, 3],
     update_offset = [0, 0, 0, 0, 1, 2]
 )
 ```
 
 # Implementation Notes
 - The explorer tracks iteration counts per replica to handle parallel tempering correctly
-- Variables are updated when `iteration % frequency[i] == offset[i]`
-- The base explorer is called on all variables, then non-updated variables are restored
-- Works with any state type that supports indexing and copying (typically Vector{Float64})
-- Can be composed with other explorers using `Compose()`
+- Variables are updated when `iteration % period[i] == offset[i]`
+- **Only variables that need updating are sampled** - no wasted computation
+- Works with any state type that supports indexing (typically Vector{Float64})
+- Specifically designed for SliceSampler to enable coordinate-wise control
 
 # Reference
 Designed for use cases similar to the ranking mechanism in:
@@ -58,88 +60,88 @@ transits = partialsortperm(SVector(transit_priorities), 1:n_transits, rev=true)
 ```
 where the `transit_priorities` are nuisance variables that can be updated less frequently.
 """
-mutable struct BlockExplorer{E}
-    base_explorer::E
-    update_frequency::Vector{Int}
+mutable struct BlockExplorer
+    slice_sampler::SliceSampler
+    update_period::Vector{Int}
     update_offset::Vector{Int}
     iteration_counts::Dict{Int, Int}
 end
 
 """
-    BlockExplorer(base_explorer; update_frequency::Vector{Int}, update_offset::Vector{Int}=zeros(Int, length(update_frequency)))
+    BlockExplorer(slice_sampler::SliceSampler; update_period::Vector{Int}, update_offset::Vector{Int}=zeros(Int, length(update_period)))
 
-Create a reduced-frequency explorer that updates variables at different rates with optional offsets.
+Create a block explorer that updates variables at different periods with optional offsets.
 
 # Arguments
-- `base_explorer`: The base explorer to wrap (e.g., `SliceSampler()`)
-- `update_frequency`: Vector specifying update frequency for each variable.
+- `slice_sampler`: The SliceSampler configuration to use
+- `update_period`: Vector specifying update period for each variable.
   Length must match the number of variables in your state.
   Each element should be a positive integer where:
   - 1 = update every iteration
   - n = update every n iterations
 - `update_offset`: Vector specifying the offset within each variable's update cycle (default: all zeros).
-  Variable i is updated when `iteration % frequency[i] == offset[i]`.
-  Offsets must satisfy `0 <= offset[i] < frequency[i]`.
+  Variable i is updated when `iteration % period[i] == offset[i]`.
+  Offsets must satisfy `0 <= offset[i] < period[i]`.
 
 # Examples
 ```julia
-# Basic: update variables at different frequencies
+# Basic: update variables at different periods
 explorer = BlockExplorer(
     SliceSampler(n_passes=3),
-    update_frequency = [1, 1, 1, 10]  # Vars 1-3 every iter, var 4 every 10
+    update_period = [1, 1, 1, 10]  # Vars 1-3 every iter, var 4 every 10
 )
 
 # Cycling: update one variable from a group per iteration
 explorer = BlockExplorer(
     SliceSampler(),
-    update_frequency = [3, 3, 3],
+    update_period = [3, 3, 3],
     update_offset = [0, 1, 2]  # Each variable updated at different points in 3-iter cycle
 )
 
 # Mixed: some always, some periodic, some cycling
-frequencies = fill(1, 80)
+periods = fill(1, 80)
 offsets = fill(0, 80)
-frequencies[4:end] .= 10  # Update last 77 variables every 10 iterations
+periods[4:end] .= 10  # Update last 77 variables every 10 iterations
 explorer = BlockExplorer(
     SliceSampler(),
-    update_frequency = frequencies,
+    update_period = periods,
     update_offset = offsets
 )
 
 # Two separate cycling groups with different periods
 explorer = BlockExplorer(
     SliceSampler(),
-    update_frequency = [5, 5, 5, 5, 5,  3, 3, 3],
+    update_period = [5, 5, 5, 5, 5,  3, 3, 3],
     update_offset =    [0, 1, 2, 3, 4,  0, 1, 2]
 )
 ```
 """
-function BlockExplorer(base_explorer::E;
-                                   update_frequency::Vector{Int},
-                                   update_offset::Vector{Int}=zeros(Int, length(update_frequency))) where E
-    # Validate update frequencies
-    if any(f <= 0 for f in update_frequency)
-        error("All update frequencies must be positive integers. Got: $update_frequency")
+function BlockExplorer(slice_sampler::SliceSampler;
+                       update_period::Vector{Int},
+                       update_offset::Vector{Int}=zeros(Int, length(update_period)))
+    # Validate update periods
+    if any(f <= 0 for f in update_period)
+        error("All update periods must be positive integers. Got: $update_period")
     end
-    if isempty(update_frequency)
-        error("update_frequency vector cannot be empty")
+    if isempty(update_period)
+        error("update_period vector cannot be empty")
     end
 
     # Validate update offsets
-    if length(update_offset) != length(update_frequency)
-        error("update_offset length ($(length(update_offset))) must match update_frequency length ($(length(update_frequency)))")
+    if length(update_offset) != length(update_period)
+        error("update_offset length ($(length(update_offset))) must match update_period length ($(length(update_period)))")
     end
     if any(update_offset .< 0)
         error("All update offsets must be non-negative. Got: $update_offset")
     end
-    if any(update_offset .>= update_frequency)
-        invalid_pairs = [(i, update_offset[i], update_frequency[i]) for i in 1:length(update_offset) if update_offset[i] >= update_frequency[i]]
-        error("All offsets must be less than their corresponding frequencies. Invalid: $invalid_pairs")
+    if any(update_offset .>= update_period)
+        invalid_pairs = [(i, update_offset[i], update_period[i]) for i in 1:length(update_offset) if update_offset[i] >= update_period[i]]
+        error("All offsets must be less than their corresponding periods. Invalid: $invalid_pairs")
     end
 
-    return BlockExplorer{E}(
-        base_explorer,
-        update_frequency,
+    return BlockExplorer(
+        slice_sampler,
+        update_period,
         update_offset,
         Dict{Int, Int}()
     )
@@ -148,16 +150,17 @@ end
 """
     step!(explorer::BlockExplorer, replica, shared)
 
-Perform one exploration step with reduced-frequency updates.
+Perform one exploration step with block-based updates.
 
 This function:
 1. Increments the iteration counter for this replica
-2. Determines which variables should be updated based on iteration count, frequency, and offset
-3. Saves the state of variables that should NOT be updated
-4. Calls the base explorer's step! function (updates all variables)
-5. Restores the saved values for variables that should not have been updated
+2. Determines which variables should be updated based on iteration count, period, and offset
+3. For each pass in n_passes:
+   - Only samples coordinates that should be updated this iteration
+   - Skips coordinates that shouldn't be updated (no wasted work!)
+4. Returns updated state
 
-Variables are updated when `iteration % frequency[i] == offset[i]`, enabling both
+Variables are updated when `iteration % period[i] == offset[i]`, enabling both
 periodic updates and cycling patterns.
 """
 function step!(explorer::BlockExplorer, replica, shared)
@@ -169,58 +172,67 @@ function step!(explorer::BlockExplorer, replica, shared)
     explorer.iteration_counts[replica_id] += 1
     current_iter = explorer.iteration_counts[replica_id]
 
-    # Validate that state length matches update_frequency length
+    # Validate that state length matches update_period length
     state_length = length(replica.state)
-    freq_length = length(explorer.update_frequency)
-    if state_length != freq_length
+    period_length = length(explorer.update_period)
+    if state_length != period_length
         error("""
-        State length ($state_length) does not match update_frequency length ($freq_length).
-        Make sure your update_frequency vector has one entry per state variable.
+        State length ($state_length) does not match update_period length ($period_length).
+        Make sure your update_period vector has one entry per state variable.
         """)
     end
 
-    # Determine which variables should be updated this iteration
-    # Variable i is updated when current_iter % update_frequency[i] == update_offset[i]
-    should_update = [current_iter % explorer.update_frequency[i] == explorer.update_offset[i]
-                     for i in eachindex(explorer.update_frequency)]
+    # Get log potential
+    log_potential = find_log_potential(replica, shared.tempering, shared)
+    h = explorer.slice_sampler
+    state = replica.state
 
-    # If all variables should be updated, just call the base explorer directly
-    if all(should_update)
-        step!(explorer.base_explorer, replica, shared)
-        return
-    end
+    # Cached log potential - reused across coordinates
+    cached_lp = -Inf
 
-    # Save values of variables that should NOT be updated
-    saved_values = similar(replica.state)
-    for i in eachindex(replica.state)
-        if !should_update[i]
-            saved_values[i] = replica.state[i]
-        end
-    end
+    # Perform n_passes, but only update coordinates that should be updated
+    for _ in 1:h.n_passes
+        # Compute cached log potential if needed
+        cached_lp = cached_log_potential(log_potential, replica.state, cached_lp)
 
-    # Run base explorer (this will update all variables)
-    step!(explorer.base_explorer, replica, shared)
+        # Iterate over coordinates, but only sample those that should be updated
+        for c in eachindex(state)
+            # Check if this coordinate should be updated this iteration
+            should_update = (current_iter % explorer.update_period[c] == explorer.update_offset[c])
 
-    # Restore variables that should not have been updated
-    for i in eachindex(replica.state)
-        if !should_update[i]
-            replica.state[i] = saved_values[i]
+            if should_update
+                # Sample this coordinate
+                pointer = Ref(state, c)
+                cached_lp = slice_sample_coord!(h, replica, pointer, log_potential, cached_lp, typeof(pointer[]))
+
+                # Check we still have a healthy state
+                if !isfinite(cached_lp)
+                    error("""Got an invalid log density after updating state at index $c:
+                    - log density = $cached_lp
+                    - state[$c]   = $(pointer[])
+                    Dumping full replica state:
+                    $(replica.state)
+                    """)
+                end
+            end
+            # If should_update is false, we skip this coordinate entirely - no work done!
         end
     end
 end
 
-# Forward adapter function to base explorer
+# Forward adapter function
 function adapt_explorer(explorer::BlockExplorer, reduced_recorders, current_pt, new_tempering)
-    adapted_base = adapt_explorer(explorer.base_explorer, reduced_recorders, current_pt, new_tempering)
+    # Adapt the underlying slice sampler (though SliceSampler doesn't adapt by default)
+    adapted_slice = adapt_explorer(explorer.slice_sampler, reduced_recorders, current_pt, new_tempering)
     return BlockExplorer(
-        adapted_base,
-        update_frequency = explorer.update_frequency,
+        adapted_slice,
+        update_period = explorer.update_period,
         update_offset = explorer.update_offset
         # Note: iteration_counts will be reset to empty Dict{Int,Int}() by constructor
         # This is intentional as adaptation happens between rounds
     )
 end
 
-# Forward recorder builders to base explorer
+# Forward recorder builders to slice sampler
 explorer_recorder_builders(explorer::BlockExplorer) =
-    explorer_recorder_builders(explorer.base_explorer)
+    explorer_recorder_builders(explorer.slice_sampler)

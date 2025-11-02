@@ -1,4 +1,4 @@
-import Pigeons: BlockExplorer, SliceSampler, Compose, step!, Replica
+import Pigeons: BlockExplorer, SliceSampler, step!, Replica
 using Distributions
 using LinearAlgebra
 
@@ -6,54 +6,54 @@ using LinearAlgebra
     # Test basic construction with default offsets
     explorer = BlockExplorer(
         SliceSampler(),
-        update_frequency = [1, 1, 10]
+        update_period = [1, 1, 10]
     )
-    @test length(explorer.update_frequency) == 3
-    @test explorer.update_frequency == [1, 1, 10]
+    @test length(explorer.update_period) == 3
+    @test explorer.update_period == [1, 1, 10]
     @test explorer.update_offset == [0, 0, 0]  # Default offsets
     @test isempty(explorer.iteration_counts)
 
     # Test construction with explicit offsets
     explorer2 = BlockExplorer(
         SliceSampler(),
-        update_frequency = [3, 3, 3],
+        update_period = [3, 3, 3],
         update_offset = [0, 1, 2]
     )
-    @test explorer2.update_frequency == [3, 3, 3]
+    @test explorer2.update_period == [3, 3, 3]
     @test explorer2.update_offset == [0, 1, 2]
 
     # Test error on invalid frequencies
     @test_throws ErrorException BlockExplorer(
         SliceSampler(),
-        update_frequency = [1, 0, 10]  # 0 is invalid
+        update_period = [1, 0, 10]  # 0 is invalid
     )
 
     @test_throws ErrorException BlockExplorer(
         SliceSampler(),
-        update_frequency = [1, -1, 10]  # negative is invalid
+        update_period = [1, -1, 10]  # negative is invalid
     )
 
     @test_throws ErrorException BlockExplorer(
         SliceSampler(),
-        update_frequency = Int[]  # empty is invalid
+        update_period = Int[]  # empty is invalid
     )
 
     # Test error on invalid offsets
     @test_throws ErrorException BlockExplorer(
         SliceSampler(),
-        update_frequency = [3, 3, 3],
+        update_period = [3, 3, 3],
         update_offset = [0, 1]  # Length mismatch
     )
 
     @test_throws ErrorException BlockExplorer(
         SliceSampler(),
-        update_frequency = [3, 3, 3],
+        update_period = [3, 3, 3],
         update_offset = [0, -1, 2]  # Negative offset
     )
 
     @test_throws ErrorException BlockExplorer(
         SliceSampler(),
-        update_frequency = [3, 3, 3],
+        update_period = [3, 3, 3],
         update_offset = [0, 1, 3]  # Offset >= frequency
     )
 end
@@ -66,7 +66,7 @@ end
     # Create explorer with different frequencies
     explorer = BlockExplorer(
         SliceSampler(n_passes=1),
-        update_frequency = [1, 1, 5]  # Last variable updated every 5 iterations
+        update_period = [1, 1, 5]  # Last variable updated every 5 iterations
     )
 
     state = [0.0, 0.0, 0.0]
@@ -104,7 +104,7 @@ end
     # Test with all variables at frequency 1 (should work like normal SliceSampler)
     explorer1 = BlockExplorer(
         SliceSampler(n_passes=1),
-        update_frequency = [1, 1, 1, 1]
+        update_period = [1, 1, 1, 1]
     )
 
     pt1 = pigeons(
@@ -121,7 +121,7 @@ end
     # Test with mixed frequencies
     explorer2 = BlockExplorer(
         SliceSampler(n_passes=1),
-        update_frequency = [1, 1, 1, 10]
+        update_period = [1, 1, 1, 10]
     )
 
     pt2 = pigeons(
@@ -135,38 +135,14 @@ end
     @test abs(mean(samples2)[1]) < 0.5
 end
 
-@testset "BlockExplorer - Composability" begin
-    # Test that BlockExplorer can be composed with other explorers
-    log_potential(x) = -0.5 * sum(x.^2)
-
-    base_explorer = SliceSampler(n_passes=1)
-    reduced_explorer = BlockExplorer(
-        base_explorer,
-        update_frequency = [1, 1, 1, 5]
-    )
-
-    # Compose should work
-    composed = Compose(reduced_explorer, SliceSampler(n_passes=1))
-
-    # Should run without errors
-    pt = pigeons(
-        target = log_potential,
-        explorer = composed,
-        n_rounds = 3,
-        n_chains = 2
-    )
-
-    @test pt isa Pigeons.PT
-end
-
 @testset "BlockExplorer - State Length Validation" begin
-    # Test that state length must match update_frequency length
+    # Test that state length must match update_period length
     rng = SplittableRandom(42)
     log_potential(x) = -0.5 * sum(x.^2)
 
     explorer = BlockExplorer(
         SliceSampler(n_passes=1),
-        update_frequency = [1, 1, 10]  # 3 variables
+        update_period = [1, 1, 10]  # 3 variables
     )
 
     state = [0.0, 0.0, 0.0, 0.0]  # 4 variables - mismatch!
@@ -194,7 +170,7 @@ end
 
     explorer = BlockExplorer(
         SliceSampler(n_passes=1),
-        update_frequency = [1, 10]
+        update_period = [1, 10]
     )
 
     state1 = [0.0, 0.0]
@@ -234,7 +210,7 @@ end
 
     explorer = BlockExplorer(
         SliceSampler(n_passes=1),
-        update_frequency = [10, 10, 10]
+        update_period = [10, 10, 10]
     )
 
     state = [1.0, 2.0, 3.0]
@@ -279,7 +255,7 @@ end
 
     explorer = BlockExplorer(
         SliceSampler(n_passes=1),
-        update_frequency = frequencies
+        update_period = frequencies
     )
 
     # Should run without errors
@@ -306,7 +282,7 @@ end
     # Cycle through 3 variables, one per iteration
     explorer = BlockExplorer(
         SliceSampler(n_passes=1),
-        update_frequency = [3, 3, 3],
+        update_period = [3, 3, 3],
         update_offset = [0, 1, 2]
     )
 
@@ -358,7 +334,7 @@ end
     # cycle through vars 4-6
     explorer = BlockExplorer(
         SliceSampler(n_passes=1),
-        update_frequency = [1, 1, 10, 3, 3, 3],
+        update_period = [1, 1, 10, 3, 3, 3],
         update_offset = [0, 0, 0, 0, 1, 2]
     )
 
@@ -422,7 +398,7 @@ end
 
     explorer = BlockExplorer(
         SliceSampler(n_passes=1),
-        update_frequency = [5, 5, 5, 5, 5,  3, 3, 3],
+        update_period = [5, 5, 5, 5, 5,  3, 3, 3],
         update_offset =    [0, 1, 2, 3, 4,  0, 1, 2]
     )
 
@@ -470,7 +446,7 @@ end
     # Cycle through 6 variables in pairs
     explorer = BlockExplorer(
         SliceSampler(n_passes=1),
-        update_frequency = [3, 3, 3, 3, 3, 3],
+        update_period = [3, 3, 3, 3, 3, 3],
         update_offset = [0, 0, 1, 1, 2, 2]
     )
 

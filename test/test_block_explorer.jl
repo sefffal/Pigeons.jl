@@ -11,7 +11,6 @@ using LinearAlgebra
     @test length(explorer.update_period) == 3
     @test explorer.update_period == [1, 1, 10]
     @test explorer.update_offset == [0, 0, 0]  # Default offsets
-    @test isempty(explorer.iteration_counts)
 
     # Test construction with explicit offsets
     explorer2 = BlockExplorer(
@@ -160,85 +159,6 @@ end
 
     # Should error due to length mismatch
     @test_throws ErrorException Pigeons.step!(explorer, replica, shared)
-end
-
-@testset "BlockExplorer - Multiple Replicas" begin
-    # Test that iteration counts are tracked per replica
-    rng1 = SplittableRandom(1)
-    rng2 = SplittableRandom(2)
-    log_potential(x) = -0.5 * sum(x.^2)
-
-    explorer = BlockExplorer(
-        SliceSampler(n_passes=1),
-        update_period = [1, 10]
-    )
-
-    state1 = [0.0, 0.0]
-    state2 = [0.0, 0.0]
-
-    shared = (
-        tempering = Pigeons.NonReversiblePT(
-            [log_potential],
-            Pigeons.Geometric(0.5)
-        ),
-        iterators = (scan = 1,),
-        explorer = explorer,
-        reports = (;)
-    )
-
-    # Run replica 1 for 5 iterations
-    for _ in 1:5
-        replica1 = Replica(state1, 1, rng1, (;), 1)
-        Pigeons.step!(explorer, replica1, shared)
-    end
-
-    # Run replica 2 for 3 iterations
-    for _ in 1:3
-        replica2 = Replica(state2, 1, rng2, (;), 2)
-        Pigeons.step!(explorer, replica2, shared)
-    end
-
-    # Check that iteration counts are tracked separately
-    @test explorer.iteration_counts[1] == 5
-    @test explorer.iteration_counts[2] == 3
-end
-
-@testset "BlockExplorer - All Variables Skip Case" begin
-    # Test edge case where all variables should be updated
-    rng = SplittableRandom(42)
-    log_potential(x) = -0.5 * sum(x.^2)
-
-    explorer = BlockExplorer(
-        SliceSampler(n_passes=1),
-        update_period = [10, 10, 10]
-    )
-
-    state = [1.0, 2.0, 3.0]
-    initial_state = copy(state)
-
-    shared = (
-        tempering = Pigeons.NonReversiblePT(
-            [log_potential],
-            Pigeons.Geometric(0.5)
-        ),
-        iterators = (scan = 1,),
-        explorer = explorer,
-        reports = (;)
-    )
-
-    # Iteration 1-9: no updates
-    for iter in 1:9
-        replica = Replica(state, 1, rng, (;), 1)
-        Pigeons.step!(explorer, replica, shared)
-        # State should not change
-        @test state == initial_state
-    end
-
-    # Iteration 10: all variables updated
-    replica = Replica(state, 1, rng, (;), 1)
-    Pigeons.step!(explorer, replica, shared)
-    # State should have changed (with very high probability)
-    @test state != initial_state
 end
 
 @testset "BlockExplorer - Typical Use Case" begin

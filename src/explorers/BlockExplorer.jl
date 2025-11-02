@@ -15,9 +15,8 @@ posterior but are computationally expensive to sample.
 - `update_period::Vector{Int}`: Update period for each variable.
   A period of 1 means update every iteration, 10 means update every 10 iterations, etc.
 - `update_offset::Vector{Int}`: Offset within the update cycle for each variable.
-  Variable i is updated when `iteration % period[i] == offset[i]`.
+  Variable i is updated when `scan % period[i] == offset[i]`, where `scan` is from `shared.iterators.scan`.
   This enables cycling through groups of variables.
-- `iteration_counts::Dict{Int, Int}`: Internal state tracking iterations per replica
 
 # Examples
 ```julia
@@ -60,11 +59,10 @@ transits = partialsortperm(SVector(transit_priorities), 1:n_transits, rev=true)
 ```
 where the `transit_priorities` are nuisance variables that can be updated less frequently.
 """
-mutable struct BlockExplorer
+struct BlockExplorer
     slice_sampler::SliceSampler
     update_period::Vector{Int}
     update_offset::Vector{Int}
-    iteration_counts::Dict{Int, Int}
 end
 
 """
@@ -142,8 +140,7 @@ function BlockExplorer(slice_sampler::SliceSampler;
     return BlockExplorer(
         slice_sampler,
         update_period,
-        update_offset,
-        Dict{Int, Int}()
+        update_offset
     )
 end
 
@@ -153,24 +150,25 @@ end
 Perform one exploration step with block-based updates.
 
 This function:
-1. Increments the iteration counter for this replica
-2. Determines which variables should be updated based on iteration count, period, and offset
+1. Gets current scan number from shared.iterators.scan (thread-safe)
+2. Determines which variables should be updated based on scan, period, and offset
 3. For each pass in n_passes:
-   - Only samples coordinates that should be updated this iteration
+   - Only samples coordinates that should be updated this scan
    - Skips coordinates that shouldn't be updated (no wasted work!)
 4. Returns updated state
 
-Variables are updated when `iteration % period[i] == offset[i]`, enabling both
+Variables are updated when `scan % period[i] == offset[i]`, enabling both
 periodic updates and cycling patterns.
+
+# Thread Safety
+This implementation is thread-safe because:
+- The explorer struct is immutable (no mutable state)
+- We read from shared.iterators.scan (managed by framework)
+- Each replica modifies only its own state
 """
 function step!(explorer::BlockExplorer, replica, shared)
-    # Initialize or increment iteration count for this replica
-    replica_id = replica.replica_index
-    if !haskey(explorer.iteration_counts, replica_id)
-        explorer.iteration_counts[replica_id] = 0
-    end
-    explorer.iteration_counts[replica_id] += 1
-    current_iter = explorer.iteration_counts[replica_id]
+    # Get current scan number (thread-safe read from framework-managed state)
+    current_scan = shared.iterators.scan
 
     # Validate that state length matches update_period length
     state_length = length(replica.state)
@@ -197,8 +195,8 @@ function step!(explorer::BlockExplorer, replica, shared)
 
         # Iterate over coordinates, but only sample those that should be updated
         for c in eachindex(state)
-            # Check if this coordinate should be updated this iteration
-            should_update = (current_iter % explorer.update_period[c] == explorer.update_offset[c])
+            # Check if this coordinate should be updated this scan
+            should_update = (current_scan % explorer.update_period[c] == explorer.update_offset[c])
 
             if should_update
                 # Sample this coordinate
@@ -228,8 +226,6 @@ function adapt_explorer(explorer::BlockExplorer, reduced_recorders, current_pt, 
         adapted_slice,
         update_period = explorer.update_period,
         update_offset = explorer.update_offset
-        # Note: iteration_counts will be reset to empty Dict{Int,Int}() by constructor
-        # This is intentional as adaptation happens between rounds
     )
 end
 

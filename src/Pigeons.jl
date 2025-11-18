@@ -70,7 +70,7 @@ export pigeons, Inputs, PT,
     # variational references:
     GaussianReference,
     # samplers
-    SliceSampler, AutoMALA, Compose, AAPS, MALA, Mix
+    SliceSampler, AutoMALA, Compose, AAPS, MALA, Mix, BlockExplorer
 
 
 

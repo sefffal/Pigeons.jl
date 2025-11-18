@@ -70,7 +70,11 @@ export pigeons, Inputs, PT,
     # variational references:
     GaussianReference,
     # samplers
-    SliceSampler, AutoMALA, Compose, AAPS, MALA, Mix
+    SliceSampler, AutoMALA, Compose, AAPS, MALA, Mix,
+    # RJMCMC:
+    RJState, RJModelInfo, RJLogPotential,
+    JumpKernel, BirthKernel, DeathKernel, create_birth_death_pair,
+    RJMCMCExplorer
 
 
 
